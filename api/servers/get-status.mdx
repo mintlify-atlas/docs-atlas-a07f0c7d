@@ -26,6 +26,9 @@ Retrieve the current processing status of an uploaded world. The response varies
   - `"procesando"` - Currently being processed
   - `"listo"` - Processing complete, ready for download
   - `"expirado"` - File has expired and been deleted
+  - `"error_procesamiento"` - Error occurred during processing
+  - `"error_procesamiento_no_encontrado"` - Error during job processing (file not found)
+  - `"error_job_timeout_or_failed"` - Job timed out or failed
 </ResponseField>
 
 ### Fields for `estado: "listo"`
@@ -182,7 +185,7 @@ When `estado` is `"pendiente"`, the `cola` field shows the position in the proce
 
 ## File Expiration
 
-Files are automatically set to expire 24 hours after creation. When a file expires:
+Files are automatically set to expire 1 hour after processing completes. When a file expires:
 
 - `estado` changes to `"expirado"`
 - The file is deleted from storage

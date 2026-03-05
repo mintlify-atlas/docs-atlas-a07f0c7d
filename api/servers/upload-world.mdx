@@ -180,6 +180,6 @@ The endpoint may return the following errors:
 - Supported formats: `.zip`, `.tar.gz` (automatically detected)
 - File size is calculated and stored as `tamano_inicio` in MB
 - Each upload is associated with the requester's IP address
-- Files expire 24 hours after creation (`fecha_expiracion`)
+- Files expire 1 hour after processing completes (`fecha_expiracion`)
 - The endpoint sends a notification when a file is successfully uploaded
 - Processing happens asynchronously via a job queue
