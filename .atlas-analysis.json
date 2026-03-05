@@ -1,0 +1,87 @@
+{
+  "projectType": "api-service",
+  "projectName": "MC World Compressor Backend",
+  "projectDescription": "Laravel API backend for compressing Minecraft worlds using the Thanos library",
+  "theme": "palm",
+  "primaryColor": "#956624",
+  "lightColor": "#4e7a19",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/compression-process",
+              "concepts/job-queue"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/uploading-worlds",
+              "guides/chunked-uploads",
+              "guides/docker-deployment",
+              "guides/notifications"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview",
+              "api/authentication",
+              "api/errors"
+            ]
+          },
+          {
+            "group": "Compression",
+            "pages": [
+              "api/compression/compress-world"
+            ]
+          },
+          {
+            "group": "Server Management",
+            "pages": [
+              "api/servers/upload-world",
+              "api/servers/get-status",
+              "api/servers/get-queue"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Minecraft world compression using Thanos library",
+    "Chunked file upload support for large files",
+    "Asynchronous job queue processing",
+    "Discord webhook notifications",
+    "Automatic file expiration and cleanup",
+    "Support for ZIP and TAR.GZ formats",
+    "Queue status tracking",
+    "Docker deployment ready"
+  ],
+  "publicApiSurface": [
+    "POST /api/comprimir - Compress a Minecraft world",
+    "POST /api/subir - Upload a world for processing",
+    "GET /api/estado/{id} - Get processing status",
+    "GET /api/cola - Get queue count",
+    "GET /api/test - Health check endpoint"
+  ]
+}
