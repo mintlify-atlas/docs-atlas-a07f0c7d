@@ -1,0 +1,185 @@
+---
+title: 'Upload World'
+api: 'POST /api/subir'
+description: 'Upload a Minecraft world file for processing, with support for chunked uploads'
+---
+
+## Overview
+
+This endpoint accepts Minecraft world files for server management. It supports both single-file uploads and chunked uploads for large files. Uploaded worlds are queued for processing and optimization.
+
+## Request
+
+### Body Parameters
+
+<ParamField body="mundo_comprimido" type="file" required>
+  The Minecraft world file to upload. Supported formats: `.zip`, `.tar.gz`
+</ParamField>
+
+### Chunked Upload Parameters
+
+For large file uploads, the endpoint supports chunked upload mode. Include these parameters to enable chunking:
+
+<ParamField body="uploadId" type="string">
+  Unique identifier for the upload session. All chunks must use the same `uploadId`.
+</ParamField>
+
+<ParamField body="fileName" type="string">
+  Original name of the file being uploaded.
+</ParamField>
+
+<ParamField body="chunkIndex" type="integer">
+  Zero-based index of the current chunk (0 for first chunk, 1 for second, etc.).
+</ParamField>
+
+<ParamField body="totalChunks" type="integer">
+  Total number of chunks that will be sent for this upload.
+</ParamField>
+
+<ParamField body="isLastChunk" type="string">
+  Set to `"true"` for the final chunk. Can also be detected automatically if `chunkIndex == totalChunks - 1`.
+</ParamField>
+
+## Response
+
+### Success Response (Single Upload or Final Chunk)
+
+<ResponseField name="message" type="string">
+  Confirmation message: `"Archivo subido y procesado."`
+</ResponseField>
+
+<ResponseField name="servidor_id" type="integer">
+  Unique ID of the created server record. Use this ID to check processing status via `/api/estado/{id}`.
+</ResponseField>
+
+<ResponseField name="estado" type="string">
+  Current state of the server. Will be `"pendiente"` for newly uploaded files.
+</ResponseField>
+
+### Success Response (Intermediate Chunk)
+
+<ResponseField name="status" type="string">
+  Status indicator: `"ok"`
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Confirmation message indicating which chunk was received: `"Chunk {index} recibido"`
+</ResponseField>
+
+### Error Response
+
+<ResponseField name="error" type="string">
+  Error message describing what went wrong during upload or processing.
+</ResponseField>
+
+## Examples
+
+### Single File Upload
+
+```bash cURL
+curl -X POST http://localhost:8000/api/subir \
+  -F "mundo_comprimido=@/path/to/world.zip" \
+  -H "Accept: application/json"
+```
+
+#### Response
+
+```json
+{
+  "message": "Archivo subido y procesado.",
+  "servidor_id": 42,
+  "estado": "pendiente"
+}
+```
+
+### Chunked Upload
+
+```bash First Chunk
+curl -X POST http://localhost:8000/api/subir \
+  -F "mundo_comprimido=@/path/to/chunk_0" \
+  -F "uploadId=abc123xyz" \
+  -F "fileName=large_world.zip" \
+  -F "chunkIndex=0" \
+  -F "totalChunks=5" \
+  -F "isLastChunk=false" \
+  -H "Accept: application/json"
+```
+
+#### Response (Intermediate Chunk)
+
+```json
+{
+  "status": "ok",
+  "message": "Chunk 0 recibido"
+}
+```
+
+```bash Last Chunk
+curl -X POST http://localhost:8000/api/subir \
+  -F "mundo_comprimido=@/path/to/chunk_4" \
+  -F "uploadId=abc123xyz" \
+  -F "fileName=large_world.zip" \
+  -F "chunkIndex=4" \
+  -F "totalChunks=5" \
+  -F "isLastChunk=true" \
+  -H "Accept: application/json"
+```
+
+#### Response (Final Chunk)
+
+```json
+{
+  "message": "Archivo subido y procesado.",
+  "servidor_id": 42,
+  "estado": "pendiente"
+}
+```
+
+### Error Response Example
+
+```json
+{
+  "error": "Falta el chunk 2"
+}
+```
+
+## Error Handling
+
+The endpoint may return the following errors:
+
+- **Missing file**: `"No se ha subido ningún archivo 'mundo_comprimido'."`
+- **Invalid upload**: `"Error en la subida del archivo: Código [error_code]"`
+- **Missing chunk**: `"Falta el chunk {index}"` (when assembling chunked upload)
+- **Storage error**: `"No se pudo guardar el archivo del mundo en el servidor."`
+- **Processing error**: `"Error en el procesamiento del archivo: [details]"`
+
+## Processing Details
+
+### Single Upload Flow
+
+1. Validates the uploaded file
+2. Generates a unique filename with slug and random ID
+3. Stores the file in `storage/app/public/mundos_pendientes/`
+4. Creates a server record with state `"pendiente"`
+5. Dispatches `ProcesarMundoServidorJob` to process the world
+6. Returns the server ID for status tracking
+
+### Chunked Upload Flow
+
+1. Stores each chunk in a temporary directory: `storage/app/chunks/{uploadId}/chunk_{index}`
+2. When the last chunk is received:
+   - Assembles all chunks into a single file
+   - Validates all chunks are present (0 through totalChunks-1)
+   - Creates an `UploadedFile` instance from the assembled file
+   - Processes as a single upload
+   - Cleans up temporary chunk directory
+
+## Notes
+
+- Files are stored with slugified names and unique IDs to prevent collisions
+- Supported formats: `.zip`, `.tar.gz` (automatically detected)
+- File size is calculated and stored as `tamano_inicio` in MB
+- Each upload is associated with the requester's IP address
+- Files expire 24 hours after creation (`fecha_expiracion`)
+- The endpoint sends a notification when a file is successfully uploaded
+- Processing happens asynchronously via a job queue

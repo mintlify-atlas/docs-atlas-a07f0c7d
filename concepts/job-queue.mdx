@@ -1,0 +1,429 @@
+---
+title: 'Job Queue System'
+description: 'Understanding Laravel queue system and background job processing'
+icon: 'list-check'
+---
+
+## Overview
+
+MC World Compressor uses Laravel's queue system to process world compressions asynchronously. This prevents timeouts, enables background processing, and provides better scalability for handling multiple uploads.
+
+## Queue Configuration
+
+### Default Connection
+
+Defined in `config/queue.php:16`:
+
+```php
+'default' => env('QUEUE_CONNECTION', 'database'),
+```
+
+The backend uses **database** as the queue driver, storing jobs in the `jobs` table.
+
+### Database Queue Settings
+
+From `config/queue.php:37`:
+
+```php
+'database' => [
+    'driver' => 'database',
+    'connection' => env('DB_QUEUE_CONNECTION'),
+    'table' => env('DB_QUEUE_TABLE', 'jobs'),
+    'queue' => env('DB_QUEUE', 'default'),
+    'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
+    'after_commit' => false,
+],
+```
+
+**Key parameters**:
+- **table**: `jobs` - Stores pending/processing jobs
+- **queue**: `default` - Queue name for job routing
+- **retry_after**: 90 seconds - Job considered failed if no heartbeat
+
+<Note>
+Failed jobs are stored in the `failed_jobs` table with full stack traces for debugging.
+</Note>
+
+## ProcesarMundoServidorJob
+
+The core background job handling world compression.
+
+### Class Definition
+
+From `app/Jobs/ProcesarMundoServidorJob.php:27`:
+
+```php
+class ProcesarMundoServidorJob implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    protected ?Servidor $servidor = null;
+    protected ?string $originalZipPublicPath = null;
+    protected ?string $extractionPath = null;
+    protected ?string $optimizedWorldPath = null;
+
+    public int $timeout = 300; // 5 minutes
+}
+```
+
+**Traits explained**:
+- **Dispatchable**: Enables `::dispatch()` static method
+- **InteractsWithQueue**: Access to `$this->job` properties
+- **Queueable**: Queue-specific functionality
+- **SerializesModels**: Safely serializes Eloquent models
+
+### Job Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Dispatched: ProcesarMundoServidorJob::dispatch()
+    Dispatched --> Queued: Stored in jobs table
+    Queued --> Processing: Worker picks up job
+    Processing --> ClaimServidor: Lock pending servidor
+    ClaimServidor --> ExtractWorld: Update state to 'procesando'
+    ExtractWorld --> RunThanos: Extract ZIP/TAR
+    RunThanos --> Recompress: Optimize with Thanos
+    Recompress --> UpdateDB: Create final ZIP
+    UpdateDB --> NotifySuccess: Mark estado='listo'
+    NotifySuccess --> Cleanup: Send Discord notification
+    Cleanup --> [*]: Delete temp files
+    
+    Processing --> Error: Exception thrown
+    Error --> NotifyError: Mark estado='error_procesamiento'
+    NotifyError --> CleanupError: Send error notification
+    CleanupError --> [*]: Delete temp and original files
+    
+    Processing --> Failed: Timeout or fatal error
+    Failed --> MarkFailed: failed() method called
+    MarkFailed --> [*]: Mark estado='error_job_timeout_or_failed'
+```
+
+## Job States
+
+### Servidor Model States
+
+The `estado` field tracks processing status:
+
+| State | Description | Set By |
+|-------|-------------|--------|
+| **pendiente** | Uploaded, awaiting processing | `ServidorController@subirMundo:141` |
+| **procesando** | Currently being compressed | `ProcesarMundoServidorJob@handle:115` |
+| **listo** | Ready for download | `ProcesarMundoServidorJob@handle:254` |
+| **error_procesamiento** | Processing exception occurred | `ProcesarMundoServidorJob@handle:274` |
+| **error_procesamiento_no_encontrado** | General error without servidor | `ProcesarMundoServidorJob@handle:294` |
+| **error_job_timeout_or_failed** | Job timeout or queue failure | `ProcesarMundoServidorJob@failed:319` |
+| **expirado** | File expired (cleanup command) | Automatic cleanup |
+
+### State Transition Example
+
+From upload to completion (`app/Jobs/ProcesarMundoServidorJob.php:108`):
+
+```php
+DB::transaction(function () {
+    $servidorParaProcesar = Servidor::where('estado', 'pendiente')
+                                    ->orderBy('fecha_creacion', 'asc')
+                                    ->first();
+
+    if ($servidorParaProcesar) {
+        $servidorParaProcesar->estado = 'procesando';
+        $servidorParaProcesar->save();
+        $this->servidor = $servidorParaProcesar;
+    }
+});
+```
+
+Then after successful processing (`app/Jobs/ProcesarMundoServidorJob.php:253`):
+
+```php
+$this->servidor->ruta = $finalOptimizedZipPublicPath;
+$this->servidor->estado = 'listo';
+$this->servidor->fecha_expiracion = now()->addHours(1);
+$this->servidor->tamano_final = $tamanoFinalEnMB;
+$this->servidor->save();
+```
+
+## Concurrency Control
+
+### Single Job Enforcement
+
+From `app/Jobs/ProcesarMundoServidorJob.php:102`:
+
+```php
+if (Servidor::where('estado', 'procesando')->exists()) {
+    Log::info("Otro servidor ya está en estado 'procesando'. " .
+              "Este job se reintentará más tarde.");
+    $this->release(60); // Release back to queue for 60 seconds
+    return;
+}
+```
+
+**Why only one job at a time?**
+- Prevents server resource exhaustion
+- Avoids disk I/O contention
+- Ensures predictable processing times
+- Simplifies memory management
+
+<Warning>
+If you need parallel processing, modify this check and ensure adequate server resources.
+</Warning>
+
+### Queue Order
+
+Jobs process in FIFO order (`app/Jobs/ProcesarMundoServidorJob.php:109`):
+
+```php
+$servidorParaProcesar = Servidor::where('estado', 'pendiente')
+                                ->orderBy('fecha_creacion', 'asc')
+                                ->first();
+```
+
+## Job Dispatch
+
+### Dispatching from Controller
+
+From `app/Http/Controllers/API/ServidorController.php:148`:
+
+```php
+ProcesarMundoServidorJob::dispatch();
+```
+
+<Info>
+Note that the job takes no constructor parameters. It finds the next pending servidor internally.
+</Info>
+
+### Why No Parameters?
+
+This design allows:
+- **Queue batching**: Single job can process multiple uploads
+- **Retry safety**: No serialization issues with models
+- **Flexibility**: Job can adapt to current queue state
+
+## Error Handling
+
+### Exception Handling
+
+From `app/Jobs/ProcesarMundoServidorJob.php:269`:
+
+```php
+catch (Exception $processingException) {
+    Log::error("Error durante el procesamiento del Servidor ID " .
+               $this->servidor->id . ": " . 
+               $processingException->getMessage());
+    
+    $message = "El mundo '{$this->servidor->id}' ha tenido un error: " .
+               $processingException->getMessage();
+    Notification::send(
+        new AnonymousNotifiable(),
+        new WorldStatusNotification($this->servidor->id, 'error', $message)
+    );
+
+    $this->servidor->estado = 'error_procesamiento';
+    $this->servidor->ruta = null;
+    $this->servidor->save();
+    
+    $this->cleanupOriginalZip();
+    throw $processingException; // Re-throw to mark job as failed
+}
+```
+
+### Failed Job Handler
+
+From `app/Jobs/ProcesarMundoServidorJob.php:309`:
+
+```php
+public function failed(Throwable $exception): void
+{
+    Log::error("Job HA FALLADO para Servidor ID: {$servidorId}. " .
+               "Excepción: " . $exception->getMessage());
+
+    if ($this->servidor && $this->servidor->estado === 'procesando') {
+        $this->servidor->estado = 'error_job_timeout_or_failed';
+        $this->servidor->ruta = null;
+        $this->servidor->save();
+    }
+
+    $this->cleanupOriginalZip();
+    
+    // Cleanup temp directories
+    if ($this->extractionPath && File::exists($this->extractionPath)) {
+        File::deleteDirectory($this->extractionPath);
+    }
+    if ($this->optimizedWorldPath && File::exists($this->optimizedWorldPath)) {
+        File::deleteDirectory($this->optimizedWorldPath);
+    }
+}
+```
+
+<Tip>
+The `failed()` method is called automatically by Laravel when a job exceeds its retry limit or timeout.
+</Tip>
+
+### Cleanup Guarantees
+
+From `app/Jobs/ProcesarMundoServidorJob.php:283`:
+
+```php
+finally {
+    if ($this->extractionPath && File::exists($this->extractionPath)) 
+        File::deleteDirectory($this->extractionPath);
+        
+    if ($this->optimizedWorldPath && File::exists($this->optimizedWorldPath)) 
+        File::deleteDirectory($this->optimizedWorldPath);
+    
+    Log::info("Limpieza de directorios temporales completada.");
+}
+```
+
+Cleanup occurs in:
+1. **finally block**: Always runs (success or exception)
+2. **failed() method**: Runs on job failure
+3. **Original file deletion**: Only on success or error
+
+## Queue Worker Setup
+
+### Running the Worker
+
+Process jobs continuously:
+
+```bash
+php artisan queue:work
+```
+
+**Options**:
+```bash
+# Process jobs for 1 hour then restart
+php artisan queue:work --timeout=300 --max-time=3600
+
+# Process only 10 jobs then exit
+php artisan queue:work --max-jobs=10
+
+# Stop after 512MB memory usage
+php artisan queue:work --memory=512
+```
+
+### Process Supervisor Configuration
+
+For production, use a process supervisor. Example with **Supervisor**:
+
+```ini
+[program:mccompressor-worker]
+process_name=%(program_name)s_%(process_num)02d
+command=php /path/to/artisan queue:work --sleep=3 --tries=3 --max-time=3600
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+user=www-data
+numprocs=1
+redirect_stderr=true
+stdout_logfile=/var/log/mccompressor-worker.log
+stopwaitsecs=3600
+```
+
+<Warning>
+`numprocs=1` is crucial due to single-job concurrency enforcement. Do not increase without modifying the concurrency check.
+</Warning>
+
+### Worker Lifecycle Management
+
+```bash
+# Reload workers after code deployment
+php artisan queue:restart
+
+# View failed jobs
+php artisan queue:failed
+
+# Retry specific failed job
+php artisan queue:retry {id}
+
+# Retry all failed jobs
+php artisan queue:retry all
+
+# Clear failed jobs
+php artisan queue:flush
+```
+
+## Monitoring Queue Status
+
+### Check Queue Length
+
+From `app/Http/Controllers/API/ServidorController.php:21`:
+
+```php
+public function getCola(){
+    $cantidad = Servidor::whereIn('estado', ['pendiente', 'procesando'])
+                        ->count();
+    return response()->json(['cola' => $cantidad]);
+}
+```
+
+**API Usage**:
+```bash
+curl http://localhost:8000/api/cola
+# Response: {"cola": 5}
+```
+
+### Check Individual Job Status
+
+From `app/Http/Controllers/API/ServidorController.php:164`:
+
+```php
+public function getStatus(Request $request){
+    $id = $request->route('id');
+    $servidor = Servidor::find($id);
+
+    if ($servidor->estado == 'pendiente') {
+        $servidoresPendientes = Servidor::where('estado', 'pendiente')
+                                         ->orderBy('fecha_creacion', 'asc')
+                                         ->get();
+        $posicionEnCola = /* calculate position */;
+        $responseData['cola'] = "{$posicionEnCola}/{$totalEnCola}";
+    }
+    
+    return response()->json($responseData);
+}
+```
+
+**API Usage**:
+```bash
+curl http://localhost:8000/api/estado/123
+# Response: {"estado": "pendiente", "cola": "3/8"}
+```
+
+## Performance Optimization
+
+### Database Indexes
+
+Ensure these indexes exist for queue performance:
+
+```sql
+CREATE INDEX idx_servidores_estado ON servidores(estado);
+CREATE INDEX idx_servidores_estado_fecha ON servidores(estado, fecha_creacion);
+```
+
+### Job Timeout Tuning
+
+Adjust based on typical world sizes (`app/Jobs/ProcesarMundoServidorJob.php:40`):
+
+```php
+// For small worlds (< 200MB)
+public int $timeout = 180; // 3 minutes
+
+// For large worlds (> 500MB)
+public int $timeout = 600; // 10 minutes
+```
+
+### Memory Considerations
+
+The external Thanos CLI process prevents PHP memory limits:
+
+```php
+$process = new Process($thanosCommand);
+$process->setTimeout(null); // No timeout limit
+```
+
+This allows processing arbitrarily large worlds without hitting PHP's memory_limit.
+
+<Card title="Next Steps" icon="arrow-right">
+Explore the [API endpoints](/api-reference/endpoints) to integrate with the queue system.
+</Card>

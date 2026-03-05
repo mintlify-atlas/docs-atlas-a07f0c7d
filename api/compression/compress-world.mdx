@@ -1,0 +1,89 @@
+---
+title: 'Compress World'
+api: 'POST /api/comprimir'
+description: 'Compress and optimize a Minecraft world file by removing uninhabited chunks'
+---
+
+## Overview
+
+This endpoint accepts a zipped Minecraft world file, optimizes it using the Thanos library to remove chunks with zero inhabited time, and returns a download URL for the compressed world.
+
+## Request
+
+### Body Parameters
+
+<ParamField body="mundo_comprimido" type="file" required>
+  A ZIP file containing the Minecraft world. The world directory must contain a `level.dat` file either at the root of the ZIP or in a single subdirectory.
+  
+  **Accepted formats:** `.zip`
+</ParamField>
+
+## Response
+
+### Success Response
+
+Returns a JSON object with the download URL for the optimized world.
+
+<ResponseField name="download_url" type="string">
+  Public URL to download the compressed and optimized world file. The file will be available at `/storage/compressed_worlds/optimized_[original-name]_[unique-id].zip`
+</ResponseField>
+
+### Error Response
+
+<ResponseField name="error" type="string">
+  Error message describing what went wrong during the compression process.
+</ResponseField>
+
+## Example
+
+```bash cURL
+curl -X POST http://localhost:8000/api/comprimir \
+  -F "mundo_comprimido=@/path/to/world.zip" \
+  -H "Accept: application/json"
+```
+
+### Success Response Example
+
+```json
+{
+  "download_url": "/storage/compressed_worlds/optimized_my-world_a1b2c3d4e5.zip"
+}
+```
+
+### Error Response Example
+
+```json
+{
+  "error": "No se pudo encontrar el directorio del mundo (que contenga level.dat) dentro del ZIP."
+}
+```
+
+## Error Handling
+
+The endpoint may return the following errors:
+
+- **Missing file**: `"No se recibió ningún archivo ZIP. Asegúrese de que el campo del formulario se llame 'mundo_comprimido'."`
+- **Upload errors**: Various PHP upload error messages (exceeds upload_max_filesize, partial upload, etc.)
+- **Invalid ZIP**: `"No es un archivo ZIP válido."` or `"Archivo ZIP inconsistente o dañado."`
+- **World not found**: `"No se pudo encontrar el directorio del mundo (que contenga level.dat) dentro del ZIP."`
+- **Optimization failed**: `"La optimización con Thanos no produjo un mundo de salida o el directorio de salida está vacío."`
+- **Storage error**: `"No se pudo guardar el archivo ZIP subido en el servidor."`
+
+## Processing Details
+
+The endpoint performs the following operations:
+
+1. Validates the uploaded ZIP file
+2. Extracts the ZIP to a temporary directory
+3. Locates the world directory (must contain `level.dat`)
+4. Uses Thanos library to remove chunks where `InhabitedTime == 0`
+5. Compresses the optimized world into a new ZIP file
+6. Returns the download URL
+7. Cleans up all temporary files
+
+## Notes
+
+- The endpoint uses `minInhabitedTime` set to `1`, meaning chunks that have never been inhabited (InhabitedTime = 0) will be removed
+- InhabitedTime is measured in ticks (20 ticks = 1 second)
+- Temporary files are automatically cleaned up in the `finally` block
+- The optimized world is stored in the `public` disk under `compressed_worlds/`

@@ -1,0 +1,99 @@
+---
+title: 'Authentication'
+description: 'Authentication and security requirements for the API'
+---
+
+## Authentication Overview
+
+The MC World Compressor API does **not require authentication** for public endpoints. All API routes are publicly accessible.
+
+## CSRF Protection
+
+The API routes are **exempt from CSRF verification** to allow easier integration with external applications.
+
+### CSRF Exemption
+
+All routes under the `/api/*` prefix are excluded from CSRF token validation as configured in the `VerifyCsrfToken` middleware:
+
+```php
+protected $except = [
+    'api/*',
+];
+```
+
+This means you can call API endpoints without including a CSRF token in your requests.
+
+## Making API Requests
+
+### Simple GET Request
+
+No special headers are required for GET requests:
+
+```bash
+curl -X GET http://your-domain.com/api/test
+```
+
+### POST Request with JSON
+
+For JSON POST requests, include the `Content-Type` header:
+
+```bash
+curl -X POST http://your-domain.com/api/endpoint \
+  -H "Content-Type: application/json" \
+  -d '{"key": "value"}'
+```
+
+### File Upload Request
+
+For file uploads, use `multipart/form-data`:
+
+```bash
+curl -X POST http://your-domain.com/api/comprimir \
+  -F "mundo_comprimido=@/path/to/world.zip"
+```
+
+## CORS Considerations
+
+If you're accessing the API from a web browser, you may need to configure CORS (Cross-Origin Resource Sharing) settings on the server side. Check with your administrator if you encounter CORS errors.
+
+## IP Tracking
+
+The API tracks the IP address of requests for:
+- Upload attribution (stored in the `ip` field)
+- Rate limiting and abuse prevention
+
+Your IP address is captured via `$request->ip()` during world uploads.
+
+## Security Best Practices
+
+<Warning>
+While the API doesn't require authentication, be mindful of:
+- File size limits (configured in `php.ini`)
+- Upload rate limits
+- Storage quotas
+</Warning>
+
+### File Upload Security
+
+The API validates uploaded files:
+- Only `.zip` files are accepted for `/api/comprimir`
+- Multiple archive formats (`.zip`, `.tar.gz`) are supported for `/api/subir`
+- File validation occurs before processing
+
+## Future Authentication
+
+If you need to implement authentication in the future, consider:
+- API tokens (Laravel Sanctum)
+- OAuth 2.0
+- JWT (JSON Web Tokens)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Overview" icon="book" href="/api/overview">
+    View all available endpoints
+  </Card>
+  <Card title="Error Handling" icon="circle-exclamation" href="/api/errors">
+    Learn about error responses
+  </Card>
+</CardGroup>

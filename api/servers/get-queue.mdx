@@ -1,0 +1,66 @@
+---
+title: 'Get Queue Count'
+api: 'GET /api/cola'
+description: 'Get the current number of worlds in the processing queue'
+---
+
+## Overview
+
+Retrieve the total number of worlds currently pending or being processed. This endpoint provides a quick way to check server load without querying individual server records.
+
+## Request
+
+No parameters required.
+
+## Response
+
+<ResponseField name="cola" type="integer">
+  Total count of servers that are either pending or currently processing.
+</ResponseField>
+
+## Example
+
+```bash cURL
+curl -X GET http://localhost:8000/api/cola \
+  -H "Accept: application/json"
+```
+
+### Response
+
+```json
+{
+  "cola": 7
+}
+```
+
+## Queue States
+
+The count includes servers in the following states:
+
+- `"pendiente"` - Waiting to be processed
+- `"procesando"` - Currently being processed
+
+## Implementation Details
+
+The endpoint executes the following query:
+
+```php
+Servidor::whereIn('estado', ['pendiente', 'procesando'])->count()
+```
+
+This counts all server records where the `estado` column is either `"pendiente"` or `"procesando"`.
+
+## Use Cases
+
+- Display current queue length to users before upload
+- Monitor server load in real-time
+- Estimate wait times based on queue depth
+- Dashboard metrics and analytics
+- Rate limiting decisions
+
+## Notes
+
+- The count does not include `"listo"` or `"expirado"` states
+- This is a lightweight endpoint suitable for frequent polling
+- No authentication required
+- Returns 0 if no worlds are queued

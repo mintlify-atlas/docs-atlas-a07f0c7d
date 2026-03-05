@@ -1,0 +1,229 @@
+---
+title: 'Backend Architecture'
+description: 'Understanding the Laravel-based architecture of MC World Compressor'
+icon: 'building'
+---
+
+## Overview
+
+MC World Compressor Backend is built on **Laravel 12** following the Model-View-Controller (MVC) architectural pattern. The backend handles Minecraft world uploads, processes them using the Thanos library, and manages file storage through a well-organized directory structure.
+
+## MVC Architecture
+
+### Models
+
+The application uses the `Servidor` model (`app/Models/Servidor.php:8`) as its primary data structure:
+
+```php
+protected $fillable = [
+    'ruta',
+    'estado',
+    'fecha_expiracion',
+    'tamano_inicio',
+    'tamano_final',
+    'ip'
+];
+```
+
+Key fields:
+- **ruta**: File path to the world archive (relative to storage disk)
+- **estado**: Job state (pendiente, procesando, listo, error)
+- **fecha_expiracion**: When the processed world expires
+- **tamano_inicio**: Original file size in MB
+- **tamano_final**: Compressed file size in MB
+- **ip**: Client IP address
+
+### Controllers
+
+Two main API controllers handle requests:
+
+#### CompressionController
+
+`app/Http/Controllers/API/CompressionController.php:15`
+
+Handles synchronous world compression:
+- Accepts ZIP uploads
+- Extracts and locates world directory (with `level.dat`)
+- Applies Thanos optimization
+- Returns download URL immediately
+
+#### ServidorController
+
+`app/Http/Controllers/API/ServidorController.php:19`
+
+Manages asynchronous processing:
+- **`subirMundo()`**: Handles chunked and standard uploads
+- **`getStatus()`**: Returns job status and queue position
+- **`getCola()`**: Returns total pending jobs
+- Dispatches background jobs for processing
+
+### Views
+
+The application includes minimal views for web interface:
+- `welcome.blade.php`: Landing page
+- `subidas.blade.php`: Upload interface
+
+## Storage Organization
+
+### Directory Structure
+
+The backend uses Laravel's filesystem abstraction with organized storage:
+
+<CodeGroup>
+```bash Public Disk
+storage/app/public/
+├── mundos_pendientes/     # Uploaded worlds awaiting processing
+├── mundos_procesados/     # Optimized, ready-to-download worlds
+└── compressed_worlds/     # Synchronous compression outputs
+```
+
+```bash Private Disk
+storage/app/private/
+└── temp_uploads/          # Temporary upload staging
+```
+
+```bash Temporary Directories
+storage/app/
+├── temp_extractions/      # Extraction workspace
+├── temp_optimized/        # Thanos output workspace
+├── temp_job_extractions/  # Job-specific extraction dirs
+├── temp_job_optimized/    # Job-specific optimization dirs
+└── chunks/                # Chunked upload assembly
+```
+</CodeGroup>
+
+### Storage Configuration
+
+Defined in `config/filesystems.php:31`:
+
+```php
+'disks' => [
+    'local' => [
+        'driver' => 'local',
+        'root' => storage_path('app/private'),
+    ],
+    'public' => [
+        'driver' => 'local',
+        'root' => storage_path('app/public'),
+        'url' => env('APP_URL').'/storage',
+        'visibility' => 'public',
+    ],
+]
+```
+
+<Tip>
+The symbolic link between `public/storage` and `storage/app/public` must be created using `php artisan storage:link` for downloads to work.
+</Tip>
+
+## Notification System
+
+### Architecture
+
+The backend implements a custom Discord notification channel:
+
+```mermaid
+graph LR
+    A[Job Event] --> B[WorldStatusNotification]
+    B --> C[DiscordWebhookChannel]
+    C --> D[Discord Webhook]
+```
+
+### Implementation
+
+#### WorldStatusNotification
+
+`app/Notifications/WorldStatusNotification.php:10`
+
+Supports five status types:
+- **subido**: World uploaded successfully
+- **procesando**: Compression in progress
+- **listo**: World ready for download
+- **error**: Processing failed
+- **expirado**: World file expired
+
+Each status type has associated emoji, color, and message format.
+
+#### DiscordWebhookChannel
+
+`app/Channels/DiscordWebhookChannel.php:9`
+
+Custom notification channel that:
+1. Retrieves webhook URL from `config/services.php`
+2. Formats notification payload
+3. Sends HTTP POST to Discord webhook
+4. Logs failures for debugging
+
+### Usage Example
+
+From `app/Jobs/ProcesarMundoServidorJob.php:261`:
+
+```php
+$message = "El mundo '{$this->servidor->id}' ha sido procesado.";
+Notification::send(
+    new AnonymousNotifiable(),
+    new WorldStatusNotification($this->servidor->id, 'listo', $message)
+);
+```
+
+## API Routes
+
+Defined in `routes/web.php:23`:
+
+| Method | Endpoint | Controller | Purpose |
+|--------|----------|------------|----------|
+| POST | `/api/comprimir` | CompressionController@compressWorld | Synchronous compression |
+| POST | `/api/subir` | ServidorController@subirMundo | Upload world (chunked support) |
+| GET | `/api/estado/{id}` | ServidorController@getStatus | Check job status |
+| GET | `/api/cola` | ServidorController@getCola | Queue length |
+
+## Database Schema
+
+The `servidores` table (migration `database/migrations/2025_05_21_161019_create_servidores_table.php:14`):
+
+```php
+Schema::create('servidores', function (Blueprint $table) {
+    $table->id();
+    $table->string('ruta')->nullable();
+    $table->string('estado')->default('pendiente');
+    $table->decimal('tamano_inicio', 8, 2)->nullable();
+    $table->decimal('tamano_final', 8, 2)->nullable();
+    $table->timestamp('fecha_expiracion')->nullable();
+    $table->timestamp('fecha_creacion')->useCurrent();
+    $table->string('ip')->nullable();
+});
+```
+
+<Note>
+The model uses custom timestamp column names: `fecha_creacion` for created_at, and disables updated_at.
+</Note>
+
+## Key Architectural Decisions
+
+### File Processing Flow
+
+1. **Upload Reception**: Files stored in `mundos_pendientes`
+2. **Job Dispatch**: Background job queued
+3. **Extraction**: Temporary extraction to `temp_job_extractions`
+4. **Optimization**: Thanos processes to `temp_job_optimized`
+5. **Compression**: Final ZIP created in `mundos_procesados`
+6. **Cleanup**: Temporary directories removed
+7. **Notification**: Discord webhook sent
+
+### Error Handling
+
+Robust error handling at multiple levels:
+- **Upload validation**: File type and size checks
+- **Extraction errors**: ZIP/TAR integrity validation
+- **Processing failures**: State transitions to error states
+- **Cleanup guarantees**: `finally` blocks ensure temp cleanup
+
+### Scalability Considerations
+
+- **Queue-based processing**: Prevents server overload
+- **Single concurrent job**: Enforced via state checks (`app/Jobs/ProcesarMundoServidorJob.php:102`)
+- **Automatic expiration**: Cleanup command removes old files
+- **Chunked uploads**: Supports large file transfers
+
+<Card title="Next Steps" icon="arrow-right">
+Learn how the [compression process](/concepts/compression-process) works internally.
+</Card>

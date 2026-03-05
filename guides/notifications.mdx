@@ -1,0 +1,448 @@
+---
+title: 'Notifications'
+description: 'Receive real-time Discord notifications for world processing events'
+---
+
+The MC World Compressor Backend includes a Discord webhook integration that sends real-time notifications when worlds are uploaded, processed, or encounter errors.
+
+## Overview
+
+Notifications are sent through Discord webhooks using a custom notification channel. The system tracks five distinct status events:
+
+- **subido** - World file successfully uploaded
+- **procesando** - World compression has started
+- **listo** - World processing completed successfully
+- **error** - Processing failed with an error
+- **expirado** - World file has expired (24 hours after upload)
+
+## Setting Up Discord Webhooks
+
+<Steps>
+  <Step title="Create a Discord webhook">
+    In your Discord server:
+    
+    1. Navigate to **Server Settings** → **Integrations** → **Webhooks**
+    2. Click **New Webhook**
+    3. Configure the webhook:
+       - Name: "MC World Compressor"
+       - Channel: Select your notification channel
+    4. Click **Copy Webhook URL**
+  </Step>
+  
+  <Step title="Configure the application">
+    Add the webhook URL to your environment configuration:
+    
+    ```bash .env
+    DISCORD_NOTIFICATIONS_WEBHOOK=https://discord.com/api/webhooks/1234567890/AbCdEfGhIjKlMnOpQrStUvWxYz
+    ```
+    
+    Or in your Docker run command:
+    
+    ```bash
+    docker run -d \
+      -e DISCORD_NOTIFICATIONS_WEBHOOK="https://discord.com/api/webhooks/..." \
+      mc-world-compressor:latest
+    ```
+  </Step>
+  
+  <Step title="Verify configuration">
+    The webhook URL is read from the config at runtime:
+    
+    ```php
+    $webhookUrl = config('services.discord.notifications_webhook');
+    ```
+    
+    Ensure your `config/services.php` includes:
+    
+    ```php
+    'discord' => [
+        'notifications_webhook' => env('DISCORD_NOTIFICATIONS_WEBHOOK'),
+    ],
+    ```
+  </Step>
+</Steps>
+
+## Notification Implementation
+
+The notification system consists of two main components:
+
+### WorldStatusNotification Class
+
+Location: `app/Notifications/WorldStatusNotification.php`
+
+This notification class formats the Discord message with embedded rich content:
+
+```php
+public function __construct(
+    $worldId, 
+    string $statusType, 
+    string $messageText, 
+    ?string $detailsText = null
+)
+```
+
+**Parameters:**
+- `$worldId` - The server/world ID from the database
+- `$statusType` - Event type: `subido`, `procesando`, `listo`, `error`, `expirado`
+- `$messageText` - Main notification message
+- `$detailsText` - Optional additional details (e.g., error messages)
+
+### DiscordWebhookChannel Class
+
+Location: `app/Channels/DiscordWebhookChannel.php`
+
+Handles the actual HTTP request to Discord's API:
+
+```php
+public function send($notifiable, Notification $notification)
+{
+    $payload = $notification->toDiscordWebhook($notifiable);
+    $webhookUrl = config('services.discord.notifications_webhook');
+    
+    $response = Http::post($webhookUrl, $payload);
+}
+```
+
+## Notification Events
+
+### Upload Complete (subido)
+
+<CodeGroup>
+
+```php Trigger
+Notification::send(
+    new AnonymousNotifiable(), 
+    new WorldStatusNotification(
+        $servidor->id, 
+        'subido', 
+        "Archivo subido por chunks"
+    )
+);
+```
+
+```json Discord Embed
+{
+  "embeds": [{
+    "title": "📤 Mundo Subido: 42",
+    "description": "Archivo subido por chunks",
+    "color": 3447003,
+    "timestamp": "2026-03-05T10:30:00.000000Z",
+    "footer": { "text": "MCCompressor" }
+  }],
+  "username": "MCCompressor Notificaciones"
+}
+```
+
+</CodeGroup>
+
+Color: Blue (`0x3498DB`)
+
+### Processing Started (procesando)
+
+```php
+Notification::send(
+    new AnonymousNotifiable(),
+    new WorldStatusNotification(
+        $servidor->id,
+        'procesando',
+        "Compresión iniciada"
+    )
+);
+```
+
+Color: Dark Blue (`0x2980B9`)
+
+### Processing Complete (listo)
+
+```php
+Notification::send(
+    new AnonymousNotifiable(),
+    new WorldStatusNotification(
+        $servidor->id,
+        'listo',
+        "Mundo procesado exitosamente",
+        "Tamaño reducido: 1024 MB → 512 MB"
+    )
+);
+```
+
+Color: Green (`0x2ECC71`)
+
+The `detailsText` appears in an embed field:
+
+```json
+{
+  "fields": [{
+    "name": "Detalles Adicionales",
+    "value": "Tamaño reducido: 1024 MB → 512 MB",
+    "inline": false
+  }]
+}
+```
+
+### Processing Error (error)
+
+```php
+Notification::send(
+    new AnonymousNotifiable(),
+    new WorldStatusNotification(
+        $servidor->id,
+        'error',
+        "Error al procesar el mundo",
+        "No se pudo encontrar level.dat en el archivo"
+    )
+);
+```
+
+Color: Red (`0xE74C3C`)
+
+Error details appear in a dedicated field:
+
+```json
+{
+  "fields": [{
+    "name": "Detalles del Error",
+    "value": "No se pudo encontrar level.dat en el archivo",
+    "inline": false
+  }]
+}
+```
+
+### World Expired (expirado)
+
+```php
+Notification::send(
+    new AnonymousNotifiable(),
+    new WorldStatusNotification(
+        $servidor->id,
+        'expirado',
+        "El mundo ha expirado y será eliminado"
+    )
+);
+```
+
+Color: Orange (`0xF39C12`)
+
+## Embed Customization
+
+The notification embed structure is built in `WorldStatusNotification.php:53-95`:
+
+```php
+public function toDiscordWebhook($notifiable)
+{
+    $worldIdentifier = ($this->worldId) ? $this->worldId : 'Desconocido';
+    $title = "Actualización del Mundo";
+    $color = 0x7289DA; // Discord Blurple (default)
+    
+    switch ($this->statusType) {
+        case 'subido':
+            $title = "📤 Mundo Subido: " . $worldIdentifier;
+            $color = 0x3498DB;
+            break;
+        // ... other cases
+    }
+    
+    $embed = [
+        'title' => $title,
+        'description' => $this->messageText,
+        'color' => $color,
+        'timestamp' => now()->toIso8601String(),
+        'footer' => ['text' => config('app.name', 'MCCompressor')],
+    ];
+    
+    if ($this->detailsText) {
+        $embed['fields'][] = [
+            'name' => ($this->statusType === 'error' ? 'Detalles del Error' : 'Detalles Adicionales'),
+            'value' => $this->detailsText,
+            'inline' => false
+        ];
+    }
+    
+    return [
+        'embeds' => [$embed],
+        'username' => config('app.name') . ' Notificaciones'
+    ];
+}
+```
+
+### Customizing Colors
+
+Modify the color codes in the `switch` statement to match your branding:
+
+```php
+case 'listo':
+    $title = "✅ Mundo Procesado: " . $worldIdentifier;
+    $color = 0x00FF00; // Bright green
+    break;
+```
+
+### Adding Additional Fields
+
+You can extend the embed with more information:
+
+```php
+$embed['fields'][] = [
+    'name' => 'Tiempo de Procesamiento',
+    'value' => $processingTime . ' segundos',
+    'inline' => true
+];
+
+$embed['fields'][] = [
+    'name' => 'Chunks Eliminados',
+    'value' => $removedChunks,
+    'inline' => true
+];
+```
+
+## Error Handling
+
+The Discord channel includes logging for failed webhook requests:
+
+```php
+if (!$webhookUrl) {
+    Log::error('Discord webhook URL not configured for notifications.');
+    return;
+}
+
+$response = Http::post($webhookUrl, $payload);
+
+if (!$response->successful()) {
+    Log::error('Failed to send Discord notification.', [
+        'status' => $response->status(),
+        'body' => $response->body()
+    ]);
+}
+```
+
+<Warning>
+If the webhook URL is not configured, notifications will fail silently. Check your application logs for configuration errors.
+</Warning>
+
+## Testing Notifications
+
+Send a test notification from the Tinker console:
+
+```bash
+docker exec -it mc-compressor php artisan tinker
+```
+
+```php
+use Illuminate\Support\Facades\Notification;
+use Illuminate\Notifications\AnonymousNotifiable;
+use App\Notifications\WorldStatusNotification;
+
+Notification::send(
+    new AnonymousNotifiable(),
+    new WorldStatusNotification(
+        999,
+        'listo',
+        'Test notification from Tinker',
+        'This is a test message to verify Discord integration'
+    )
+);
+```
+
+You should see a notification appear in your configured Discord channel.
+
+## Notification Examples
+
+### Complete Upload Flow
+
+```php
+// 1. File uploaded
+Notification::send(
+    new AnonymousNotifiable(),
+    new WorldStatusNotification(
+        $servidor->id,
+        'subido',
+        "World '{$fileName}' uploaded successfully"
+    )
+);
+
+// 2. Processing started
+Notification::send(
+    new AnonymousNotifiable(),
+    new WorldStatusNotification(
+        $servidor->id,
+        'procesando',
+        "Starting compression for world {$servidor->id}"
+    )
+);
+
+// 3. Processing complete
+Notification::send(
+    new AnonymousNotifiable(),
+    new WorldStatusNotification(
+        $servidor->id,
+        'listo',
+        "World {$servidor->id} compressed successfully",
+        "Size: {$servidor->tamano_inicio} MB → {$servidor->tamano_final} MB\nSavings: {$percentage}%"
+    )
+);
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Rate limiting">
+    Discord webhooks have rate limits. Avoid sending notifications in tight loops:
+    
+    - Maximum 30 requests per 60 seconds per webhook
+    - Maximum 5 requests per 2 seconds
+    
+    For bulk operations, consider batching notifications.
+  </Accordion>
+  
+  <Accordion title="Queue notifications">
+    For high-volume applications, queue notifications to avoid blocking:
+    
+    ```php
+    class WorldStatusNotification extends Notification implements ShouldQueue
+    {
+        use Queueable;
+        // ...
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Monitor webhook health">
+    Periodically verify webhook connectivity:
+    
+    ```bash
+    curl -X POST $DISCORD_WEBHOOK \
+      -H "Content-Type: application/json" \
+      -d '{"content": "Health check"}'
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+### Notifications Not Appearing
+
+1. **Check webhook URL**: Verify the environment variable is set correctly
+2. **Check Discord permissions**: Ensure the webhook has permission to post in the channel
+3. **Check logs**: Look for errors in `storage/logs/laravel.log`
+4. **Test webhook directly**: Use curl to send a test message
+
+### Invalid Webhook Errors
+
+```json
+{
+  "status": 404,
+  "body": "{\"message\": \"Unknown Webhook\"}"
+}
+```
+
+**Solution**: The webhook was deleted or the URL is incorrect. Create a new webhook and update your configuration.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Uploading Worlds" icon="upload" href="/guides/uploading-worlds">
+    Learn how to trigger these notifications by uploading worlds
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/servers/upload-world">
+    Explore the API endpoints that generate notifications
+  </Card>
+</CardGroup>

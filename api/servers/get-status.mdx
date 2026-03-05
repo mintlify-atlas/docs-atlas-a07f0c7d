@@ -1,0 +1,198 @@
+---
+title: 'Get Status'
+api: 'GET /api/estado/{id}'
+description: 'Check the processing status of an uploaded world'
+---
+
+## Overview
+
+Retrieve the current processing status of an uploaded world. The response varies based on the current state of the server record.
+
+## Request
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  The server ID returned from the `/api/subir` endpoint.
+</ParamField>
+
+## Response
+
+### Common Fields
+
+<ResponseField name="estado" type="string" required>
+  Current processing state. Possible values:
+  - `"pendiente"` - Queued for processing
+  - `"procesando"` - Currently being processed
+  - `"listo"` - Processing complete, ready for download
+  - `"expirado"` - File has expired and been deleted
+</ResponseField>
+
+### Fields for `estado: "listo"`
+
+<ResponseField name="download_url" type="string">
+  Public URL to download the processed world file.
+</ResponseField>
+
+<ResponseField name="fecha_expiracion" type="datetime">
+  Expiration date/time when the file will be deleted. Format: ISO 8601 timestamp.
+</ResponseField>
+
+<ResponseField name="fecha_creacion" type="datetime">
+  Creation date/time when the file was uploaded. Format: ISO 8601 timestamp.
+</ResponseField>
+
+<ResponseField name="tamano_inicio" type="float">
+  Original file size in MB before processing.
+</ResponseField>
+
+<ResponseField name="tamano_final" type="float">
+  Final file size in MB after processing.
+</ResponseField>
+
+### Fields for `estado: "pendiente"`
+
+<ResponseField name="cola" type="string">
+  Queue position in the format `"{position}/{total}"`. For example, `"3/10"` means position 3 out of 10 total pending jobs.
+</ResponseField>
+
+### Fields for `estado: "procesando"` or `estado: "expirado"`
+
+<ResponseField name="fecha_expiracion" type="datetime">
+  Expiration date/time. Format: ISO 8601 timestamp.
+</ResponseField>
+
+<ResponseField name="fecha_creacion" type="datetime">
+  Creation date/time. Format: ISO 8601 timestamp.
+</ResponseField>
+
+<ResponseField name="tamano_inicio" type="float">
+  Original file size in MB.
+</ResponseField>
+
+<ResponseField name="tamano_final" type="float">
+  Final file size in MB (may be null if not yet processed).
+</ResponseField>
+
+### Error Response
+
+<ResponseField name="error" type="string">
+  Error message when the server record is not found or is in an unknown state.
+</ResponseField>
+
+## Examples
+
+### Check Status - Pending
+
+```bash cURL
+curl -X GET http://localhost:8000/api/estado/42 \
+  -H "Accept: application/json"
+```
+
+#### Response
+
+```json
+{
+  "estado": "pendiente",
+  "cola": "3/10"
+}
+```
+
+### Check Status - Processing
+
+```bash cURL
+curl -X GET http://localhost:8000/api/estado/42 \
+  -H "Accept: application/json"
+```
+
+#### Response
+
+```json
+{
+  "estado": "procesando",
+  "fecha_expiracion": "2026-03-06T14:30:00.000000Z",
+  "fecha_creacion": "2026-03-05T14:30:00.000000Z",
+  "tamano_inicio": 125.5,
+  "tamano_final": null
+}
+```
+
+### Check Status - Ready
+
+```bash cURL
+curl -X GET http://localhost:8000/api/estado/42 \
+  -H "Accept: application/json"
+```
+
+#### Response
+
+```json
+{
+  "estado": "listo",
+  "download_url": "/storage/mundos_procesados/my-world_a1b2c3d4e5.zip",
+  "fecha_expiracion": "2026-03-06T14:30:00.000000Z",
+  "fecha_creacion": "2026-03-05T14:30:00.000000Z",
+  "tamano_inicio": 125.5,
+  "tamano_final": 87.3
+}
+```
+
+### Check Status - Expired
+
+```bash cURL
+curl -X GET http://localhost:8000/api/estado/42 \
+  -H "Accept: application/json"
+```
+
+#### Response
+
+```json
+{
+  "estado": "expirado",
+  "fecha_expiracion": "2026-03-06T14:30:00.000000Z",
+  "fecha_creacion": "2026-03-05T14:30:00.000000Z",
+  "tamano_inicio": 125.5,
+  "tamano_final": 87.3
+}
+```
+
+### Error Response - Not Found
+
+```bash cURL
+curl -X GET http://localhost:8000/api/estado/999 \
+  -H "Accept: application/json"
+```
+
+#### Response
+
+```json
+{
+  "error": "Servidor no encontrado"
+}
+```
+
+## Queue Position Details
+
+When `estado` is `"pendiente"`, the `cola` field shows the position in the processing queue:
+
+- Format: `"{position}/{total}"`
+- Position is 1-based (first in queue = 1)
+- Queue is ordered by `fecha_creacion` (oldest first)
+- Only includes servers with `estado: "pendiente"`
+
+## File Expiration
+
+Files are automatically set to expire 24 hours after creation. When a file expires:
+
+- `estado` changes to `"expirado"`
+- The file is deleted from storage
+- File size information remains available
+- Download URL is no longer accessible
+
+## Notes
+
+- Poll this endpoint to track processing progress
+- Recommended polling interval: 5-10 seconds for pending/processing states
+- The `download_url` is only available when `estado == "listo"`
+- Size values are in megabytes (MB) with decimal precision
+- Timestamps are in UTC timezone

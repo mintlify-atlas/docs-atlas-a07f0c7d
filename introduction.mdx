@@ -1,0 +1,98 @@
+---
+title: Introduction
+description: Laravel API backend for compressing Minecraft worlds using the Thanos library
+---
+
+<img
+  className="block"
+  src="https://media.brand.dev/ee6bc7cc-d977-4f0f-ba0e-66c7992aeb23.webp"
+  alt="MC World Compressor"
+  style={{ maxWidth: '200px', marginBottom: '2rem' }}
+/>
+
+# Welcome to MC World Compressor Backend
+
+MC World Compressor is a powerful Laravel 12 API backend that efficiently compresses Minecraft worlds using the [Thanos](https://github.com/aternosorg/thanos) library. This tool is designed to reduce file sizes for backups, world transfers, and storage optimization.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="World Compression" icon="compress" href="/concepts/compression-process">
+    Compress Minecraft worlds by removing unused chunks using the Thanos library
+  </Card>
+  <Card title="Chunked Uploads" icon="cloud-arrow-up" href="/guides/chunked-uploads">
+    Support for large file uploads through chunked transfer for worlds of any size
+  </Card>
+  <Card title="Job Queue System" icon="list-check" href="/concepts/job-queue">
+    Asynchronous processing with Laravel queues for efficient world compression
+  </Card>
+  <Card title="Docker Ready" icon="docker" href="/guides/docker-deployment">
+    Pre-configured Docker setup for easy deployment and scaling
+  </Card>
+  <Card title="Status Tracking" icon="chart-line" href="/api/servers/get-status">
+    Real-time status tracking for compression jobs with queue position
+  </Card>
+  <Card title="Multiple Formats" icon="file-zipper" href="/guides/uploading-worlds">
+    Support for ZIP and TAR.GZ archive formats
+  </Card>
+</CardGroup>
+
+## How It Works
+
+The MC World Compressor backend processes Minecraft worlds in three main steps:
+
+1. **Upload**: Submit your Minecraft world archive (ZIP or TAR.GZ) via the API
+2. **Process**: The backend extracts, analyzes, and removes unused chunks using Thanos
+3. **Download**: Receive your compressed world archive ready for use
+
+<Note>
+The compression process removes chunks with an InhabitedTime of 0, which are chunks that have never been visited by players. This significantly reduces world file size without affecting gameplay.
+</Note>
+
+## Use Cases
+
+<AccordionGroup>
+  <Accordion title="World Backups" icon="floppy-disk">
+    Reduce the storage space required for Minecraft world backups by removing unused chunks before archiving.
+  </Accordion>
+  <Accordion title="Server Transfers" icon="server">
+    Transfer worlds between servers more quickly by compressing them first, reducing upload and download times.
+  </Accordion>
+  <Accordion title="Storage Optimization" icon="hard-drive">
+    Free up disk space on your server by compressing inactive or archived worlds.
+  </Accordion>
+  <Accordion title="World Distribution" icon="share-nodes">
+    Distribute custom maps or worlds to players with smaller file sizes for faster downloads.
+  </Accordion>
+</AccordionGroup>
+
+## Quick Links
+
+<CardGroup cols={3}>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Get started in minutes
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore the API endpoints
+  </Card>
+  <Card title="GitHub" icon="github" href="https://github.com/MC-World-Compressor/Backend">
+    View the source code
+  </Card>
+</CardGroup>
+
+## Requirements
+
+- PHP >= 8.2
+- Composer
+- Node.js >= 18
+- Thanos library (included in setup)
+- MySQL or SQLite database
+- Laravel 12
+
+## License
+
+This project is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) license. 
+
+<Warning>
+This project is open source but cannot be used for commercial purposes. You cannot monetize any derivative work based on this repository. See the [LICENSE](https://github.com/MC-World-Compressor/Backend/blob/main/LICENSE) for full details.
+</Warning>

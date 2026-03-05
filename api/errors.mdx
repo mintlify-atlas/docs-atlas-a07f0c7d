@@ -1,0 +1,280 @@
+---
+title: 'Error Handling'
+description: 'Understanding API error responses and common error scenarios'
+---
+
+## Error Response Format
+
+All errors return a JSON response with an `error` field containing a descriptive message:
+
+```json
+{
+  "error": "Error message description"
+}
+```
+
+## HTTP Status Codes
+
+The API uses standard HTTP status codes:
+
+| Status Code | Meaning | Description |
+|-------------|---------|-------------|
+| `200` | OK | Request successful |
+| `201` | Created | Resource created successfully |
+| `400` | Bad Request | Invalid request parameters |
+| `404` | Not Found | Resource not found |
+| `500` | Internal Server Error | Server-side error during processing |
+
+## Common Error Scenarios
+
+### Validation Errors
+
+#### Missing Required File
+
+**Endpoint**: `/api/comprimir`
+
+**Error**:
+```json
+{
+  "error": "No se recibió ningún archivo ZIP. Asegúrese de que el campo del formulario se llame 'mundo_comprimido'."
+}
+```
+
+**Status Code**: `500`
+
+**Solution**: Ensure the file upload field name is `mundo_comprimido`.
+
+#### Invalid File Type
+
+When uploading a non-ZIP file to `/api/comprimir`:
+
+```json
+{
+  "message": "The mundo_comprimido field must be a file of type: zip.",
+  "errors": {
+    "mundo_comprimido": [
+      "The mundo_comprimido field must be a file of type: zip."
+    ]
+  }
+}
+```
+
+**Status Code**: `422` (Unprocessable Entity)
+
+### File Upload Errors
+
+#### File Size Exceeded
+
+```json
+{
+  "error": "Error en la subida del archivo ZIP: El archivo excede la directiva upload_max_filesize en php.ini."
+}
+```
+
+**Status Code**: `500`
+
+**Solution**: Reduce file size or contact administrator to increase upload limits.
+
+#### Partial Upload
+
+```json
+{
+  "error": "Error en la subida del archivo ZIP: El archivo solo se subió parcialmente."
+}
+```
+
+**Status Code**: `500`
+
+**Solution**: Retry the upload with a stable connection.
+
+#### Server Permissions Issue
+
+```json
+{
+  "error": "Error en la subida del archivo ZIP: No se pudo escribir el archivo en el disco en el servidor (problema de permisos en la carpeta temporal de PHP)."
+}
+```
+
+**Status Code**: `500`
+
+**Solution**: Contact administrator to fix server permissions.
+
+### Processing Errors
+
+#### Invalid ZIP File
+
+```json
+{
+  "error": "No se pudo abrir el archivo ZIP (ruta: /path/to/file). No es un archivo ZIP válido."
+}
+```
+
+**Status Code**: `500`
+
+**Solution**: Ensure the uploaded file is a valid ZIP archive.
+
+#### Corrupted ZIP File
+
+```json
+{
+  "error": "No se pudo abrir el archivo ZIP (ruta: /path/to/file). Archivo ZIP inconsistente o dañado."
+}
+```
+
+**Status Code**: `500`
+
+**Solution**: Re-create the ZIP file and try again.
+
+#### World Directory Not Found
+
+```json
+{
+  "error": "No se pudo encontrar el directorio del mundo (que contenga level.dat) dentro del ZIP."
+}
+```
+
+**Status Code**: `500`
+
+**Solution**: Ensure your ZIP contains a valid Minecraft world with a `level.dat` file.
+
+#### Optimization Failed
+
+```json
+{
+  "error": "La optimización con Thanos no produjo un mundo de salida o el directorio de salida está vacío."
+}
+```
+
+**Status Code**: `500`
+
+**Solution**: Verify the world structure is valid and not corrupted.
+
+### Resource Not Found
+
+#### Server ID Not Found
+
+**Endpoint**: `/api/estado/{id}`
+
+```json
+{
+  "error": "Servidor no encontrado"
+}
+```
+
+**Status Code**: `404`
+
+**Solution**: Verify the server ID is correct.
+
+### Chunk Upload Errors
+
+#### Missing Chunk
+
+**Endpoint**: `/api/subir`
+
+```json
+{
+  "error": "Falta el chunk 3"
+}
+```
+
+**Status Code**: `400`
+
+**Solution**: Re-upload all chunks, ensuring none are missing.
+
+#### No Chunk File
+
+```json
+{
+  "error": "No chunk file uploaded."
+}
+```
+
+**Status Code**: `400`
+
+**Solution**: Ensure the chunk data is included in the request.
+
+## Upload Error Codes
+
+PHP upload error codes and their meanings:
+
+| Code | Constant | Description |
+|------|----------|-------------|
+| 1 | `UPLOAD_ERR_INI_SIZE` | File exceeds `upload_max_filesize` |
+| 2 | `UPLOAD_ERR_FORM_SIZE` | File exceeds `MAX_FILE_SIZE` |
+| 3 | `UPLOAD_ERR_PARTIAL` | File only partially uploaded |
+| 4 | `UPLOAD_ERR_NO_FILE` | No file was uploaded |
+| 6 | `UPLOAD_ERR_NO_TMP_DIR` | Missing temporary folder |
+| 7 | `UPLOAD_ERR_CANT_WRITE` | Failed to write file to disk |
+| 8 | `UPLOAD_ERR_EXTENSION` | PHP extension stopped upload |
+
+## Debugging Tips
+
+<Steps>
+  <Step title="Check the error message">
+    Read the error message carefully - it often contains specific details about what went wrong
+  </Step>
+  
+  <Step title="Verify file format">
+    Ensure you're uploading the correct file type (ZIP for compression)
+  </Step>
+  
+  <Step title="Check file size">
+    Large files may exceed server limits. Check `upload_max_filesize` and `post_max_size` in PHP configuration
+  </Step>
+  
+  <Step title="Validate world structure">
+    Make sure your Minecraft world contains a valid `level.dat` file
+  </Step>
+  
+  <Step title="Test with health check">
+    Use `/api/test` to verify basic API connectivity
+  </Step>
+</Steps>
+
+## Example Error Handling
+
+### JavaScript/Fetch
+
+```javascript
+const formData = new FormData();
+formData.append('mundo_comprimido', file);
+
+fetch('/api/comprimir', {
+  method: 'POST',
+  body: formData
+})
+.then(response => {
+  if (!response.ok) {
+    return response.json().then(err => {
+      throw new Error(err.error || 'Unknown error');
+    });
+  }
+  return response.json();
+})
+.then(data => {
+  console.log('Success:', data.download_url);
+})
+.catch(error => {
+  console.error('Error:', error.message);
+});
+```
+
+### cURL
+
+```bash
+curl -X POST http://your-domain.com/api/comprimir \
+  -F "mundo_comprimido=@world.zip" \
+  -w "\nHTTP Status: %{http_code}\n" \
+  -o response.json
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Overview" icon="book" href="/api/overview">
+    Learn about all available endpoints
+  </Card>
+  <Card title="Compression Endpoint" icon="file-zipper" href="/api/compression/compress-world">
+    Detailed compression endpoint documentation
+  </Card>
+</CardGroup>

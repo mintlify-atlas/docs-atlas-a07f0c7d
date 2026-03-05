@@ -1,0 +1,381 @@
+---
+title: 'Docker Deployment'
+description: 'Deploy the MC World Compressor Backend using Docker containers'
+---
+
+The MC World Compressor Backend is designed to run in Docker containers, providing a consistent and isolated environment with all necessary dependencies pre-configured.
+
+## Dockerfile Overview
+
+The application uses a multi-stage build based on PHP 8.4-FPM with Node.js 20 for frontend assets.
+
+### Base Image
+
+```dockerfile
+FROM php:8.4-fpm
+```
+
+The application runs on PHP 8.4 with FPM (FastCGI Process Manager) for optimal performance.
+
+## Building the Docker Image
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/your-repo/mc-world-compressor.git
+    cd mc-world-compressor
+    ```
+  </Step>
+  
+  <Step title="Build the image">
+    ```bash
+    docker build -t mc-world-compressor:latest .
+    ```
+    
+    This process will:
+    - Install system dependencies (curl, zip, libzip-dev, etc.)
+    - Install PHP extensions (intl, mbstring, zip, pdo_mysql, dom, pdo_sqlite)
+    - Install Composer and npm packages
+    - Configure PHP upload limits and timeouts
+  </Step>
+  
+  <Step title="Verify the build">
+    ```bash
+    docker images | grep mc-world-compressor
+    ```
+  </Step>
+</Steps>
+
+## System Dependencies
+
+The Dockerfile installs the following system packages:
+
+<AccordionGroup>
+  <Accordion title="Core utilities">
+    - **curl** - HTTP client for API calls
+    - **zip/unzip** - Archive manipulation
+    - **sqlite3** - Database engine
+    - **lz4** - Fast compression library
+  </Accordion>
+  
+  <Accordion title="Development libraries">
+    - **libzip-dev** - ZIP archive library
+    - **libicu-dev** - Unicode and internationalization
+    - **libxml2-dev** - XML parsing
+    - **libcurl4-openssl-dev** - cURL with SSL support
+    - **libsqlite3-dev** - SQLite development files
+    - **liblz4-dev** - LZ4 compression library
+    - **libonig-dev** - Oniguruma regular expressions
+  </Accordion>
+  
+  <Accordion title="PHP extensions">
+    Installed via `docker-php-ext-install`:
+    - **intl** - Internationalization
+    - **mbstring** - Multibyte string handling
+    - **zip** - ZIP archive support
+    - **pdo_mysql** - MySQL database driver
+    - **dom** - DOM manipulation
+    - **pdo_sqlite** - SQLite database driver
+  </Accordion>
+</AccordionGroup>
+
+## PHP Configuration
+
+The Docker image configures PHP with generous limits for handling large world files:
+
+```ini
+# /usr/local/etc/php/conf.d/uploads.ini
+upload_max_filesize = 8192M
+post_max_size = 8192M
+max_input_time = 1800      # 30 minutes
+max_execution_time = 1800  # 30 minutes
+memory_limit = 8192M
+```
+
+<Note>
+These settings allow uploads up to 8GB with 30-minute processing timeouts. Adjust these values in the Dockerfile if you need different limits.
+</Note>
+
+### PHP-FPM Configuration
+
+The FPM worker pool is configured with an extended request timeout:
+
+```ini
+# /usr/local/etc/php-fpm.d/www.conf
+request_terminate_timeout = 1800s
+```
+
+This ensures long-running compression jobs aren't terminated prematurely.
+
+## Running the Container
+
+### Basic Usage
+
+```bash
+docker run -d \
+  --name mc-compressor \
+  -p 8000:8000 \
+  -v $(pwd)/storage:/var/www/storage \
+  mc-world-compressor:latest
+```
+
+### With Environment Variables
+
+```bash
+docker run -d \
+  --name mc-compressor \
+  -p 8000:8000 \
+  -e APP_ENV=production \
+  -e APP_DEBUG=false \
+  -e APP_KEY=base64:your-app-key-here \
+  -e DB_CONNECTION=sqlite \
+  -e DB_DATABASE=/var/www/storage/database/database.sqlite \
+  -e DISCORD_NOTIFICATIONS_WEBHOOK=https://discord.com/api/webhooks/... \
+  -v $(pwd)/storage:/var/www/storage \
+  mc-world-compressor:latest
+```
+
+## Environment Variables
+
+<ParamField path="APP_ENV" type="string" default="production">
+  Application environment: `production`, `staging`, or `local`
+</ParamField>
+
+<ParamField path="APP_DEBUG" type="boolean" default="false">
+  Enable debug mode. Set to `false` in production for security.
+</ParamField>
+
+<ParamField path="APP_KEY" type="string" required>
+  Laravel application encryption key. Generate with `php artisan key:generate`.
+</ParamField>
+
+<ParamField path="DB_CONNECTION" type="string" default="sqlite">
+  Database driver: `sqlite`, `mysql`, `pgsql`
+</ParamField>
+
+<ParamField path="DB_DATABASE" type="string">
+  Database path (SQLite) or name (MySQL/PostgreSQL)
+</ParamField>
+
+<ParamField path="DISCORD_NOTIFICATIONS_WEBHOOK" type="string">
+  Discord webhook URL for status notifications. See [Notifications guide](/guides/notifications).
+</ParamField>
+
+<ParamField path="QUEUE_CONNECTION" type="string" default="database">
+  Queue driver: `database`, `redis`, `sync`
+</ParamField>
+
+## Volume Mounts
+
+### Storage Directory
+
+```bash
+-v /path/on/host/storage:/var/www/storage
+```
+
+Mount the storage directory to persist:
+- Uploaded world files
+- Processed/compressed worlds
+- Application logs
+- SQLite database
+- Temporary chunk uploads
+
+<Warning>
+The storage directory must be writable by the container's web server user (typically `www-data`).
+</Warning>
+
+### Setting Permissions
+
+```bash
+mkdir -p ./storage
+chmod -R 775 ./storage
+chown -R www-data:www-data ./storage  # Linux
+# or
+chown -R 33:33 ./storage  # Using UID/GID
+```
+
+## Docker Compose
+
+For production deployments, use Docker Compose:
+
+```yaml docker-compose.yml
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: mc-compressor
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - APP_KEY=${APP_KEY}
+      - DB_CONNECTION=sqlite
+      - DB_DATABASE=/var/www/storage/database/database.sqlite
+      - DISCORD_NOTIFICATIONS_WEBHOOK=${DISCORD_WEBHOOK}
+      - QUEUE_CONNECTION=database
+    volumes:
+      - ./storage:/var/www/storage
+      - ./database:/var/www/database
+    restart: unless-stopped
+    networks:
+      - compressor-network
+
+  # Optional: Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: mc-compressor-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+    networks:
+      - compressor-network
+
+networks:
+  compressor-network:
+    driver: bridge
+```
+
+### Starting with Docker Compose
+
+```bash
+# Create .env file
+cp .env.example .env
+
+# Generate application key
+docker-compose run --rm app php artisan key:generate
+
+# Start services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f app
+
+# Run migrations
+docker-compose exec app php artisan migrate
+```
+
+## Health Checks
+
+Add health checks to your Docker Compose configuration:
+
+```yaml
+services:
+  app:
+    # ... other config ...
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/test"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+```
+
+## Production Considerations
+
+<CardGroup cols={2}>
+  <Card title="Resource Limits" icon="gauge-high">
+    Set Docker resource limits to prevent memory exhaustion:
+    
+    ```bash
+    docker run -d \
+      --memory="16g" \
+      --cpus="4" \
+      mc-world-compressor:latest
+    ```
+  </Card>
+  
+  <Card title="Log Management" icon="file-lines">
+    Configure log rotation to prevent disk space issues:
+    
+    ```yaml
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    ```
+  </Card>
+  
+  <Card title="Reverse Proxy" icon="shield">
+    Use Nginx or Traefik as a reverse proxy for SSL termination and load balancing.
+  </Card>
+  
+  <Card title="Queue Workers" icon="gears">
+    Run separate containers for queue workers:
+    
+    ```bash
+    docker run -d \
+      --name mc-compressor-worker \
+      mc-world-compressor:latest \
+      php artisan queue:work
+    ```
+  </Card>
+</CardGroup>
+
+## Container Startup
+
+The container runs both PHP-FPM and the Node.js development server:
+
+```bash
+CMD ["sh", "-c", "npm start & php-fpm"]
+```
+
+<Note>
+For production, consider running Node.js assets separately or building them during the Docker build process.
+</Note>
+
+## Troubleshooting
+
+### Upload Failures
+
+**Issue**: Uploads fail with "file too large" errors
+
+**Solution**: Check both PHP and web server (Nginx/Apache) upload limits:
+
+```bash
+# View current PHP limits
+docker exec mc-compressor php -i | grep upload_max_filesize
+
+# Rebuild with higher limits if needed
+docker build --build-arg UPLOAD_MAX_SIZE=16384M -t mc-world-compressor .
+```
+
+### Permission Errors
+
+**Issue**: "Permission denied" when writing to storage
+
+**Solution**: Fix storage directory permissions:
+
+```bash
+docker exec mc-compressor chown -R www-data:www-data /var/www/storage
+docker exec mc-compressor chmod -R 775 /var/www/storage
+```
+
+### Database Errors
+
+**Issue**: SQLite database locked or not found
+
+**Solution**: Ensure database directory exists and is writable:
+
+```bash
+docker exec mc-compressor php artisan migrate:fresh
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Uploading Worlds" icon="upload" href="/guides/uploading-worlds">
+    Learn how to upload Minecraft worlds to your deployed instance
+  </Card>
+  <Card title="Notifications" icon="bell" href="/guides/notifications">
+    Configure Discord webhooks for processing notifications
+  </Card>
+</CardGroup>

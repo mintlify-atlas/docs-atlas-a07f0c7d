@@ -1,0 +1,340 @@
+---
+title: 'Chunked Uploads'
+description: 'Upload large world files in chunks for improved reliability and progress tracking'
+---
+
+For large Minecraft world files (over 2GB), chunked uploads provide a reliable way to transfer data by splitting the file into smaller pieces. This approach offers better error handling and the ability to track upload progress.
+
+## How Chunked Uploads Work
+
+The chunked upload system splits large files into smaller segments that are uploaded sequentially. When all chunks are received, the server automatically assembles them into the final file.
+
+<Steps>
+  <Step title="Split the file">
+    Divide your world file into chunks (typically 5-10 MB each).
+  </Step>
+  
+  <Step title="Generate upload ID">
+    Create a unique identifier for this upload session (e.g., UUID).
+  </Step>
+  
+  <Step title="Upload chunks sequentially">
+    Send each chunk with metadata indicating its position and the total count.
+  </Step>
+  
+  <Step title="Server assembly">
+    When the last chunk is received, the server assembles all pieces into the final file.
+  </Step>
+</Steps>
+
+## Implementation Details
+
+The chunked upload implementation is handled in `ServidorController.php:27-97`.
+
+### Required Parameters
+
+Each chunk upload must include:
+
+- **uploadId** - Unique identifier for this upload session
+- **fileName** - Original filename of the world archive
+- **chunkIndex** - Zero-based index of the current chunk (0, 1, 2, ...)
+- **totalChunks** - Total number of chunks in the upload
+- **isLastChunk** - Set to `"true"` for the final chunk
+- **mundo_comprimido** - The chunk file data
+
+### Chunk Storage
+
+Chunks are temporarily stored in `storage/app/chunks/{uploadId}/chunk_{index}` until assembly.
+
+## JavaScript/Browser Example
+
+Here's a complete implementation for chunked uploads from a web browser:
+
+```javascript
+const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB chunks
+
+async function uploadWorldInChunks(file) {
+  const uploadId = crypto.randomUUID();
+  const fileName = file.name;
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  
+  console.log(`Uploading ${fileName} in ${totalChunks} chunks...`);
+  
+  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+    const start = chunkIndex * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, file.size);
+    const chunk = file.slice(start, end);
+    
+    const formData = new FormData();
+    formData.append('uploadId', uploadId);
+    formData.append('fileName', fileName);
+    formData.append('chunkIndex', chunkIndex.toString());
+    formData.append('totalChunks', totalChunks.toString());
+    formData.append('isLastChunk', (chunkIndex === totalChunks - 1).toString());
+    formData.append('mundo_comprimido', chunk);
+    
+    const response = await fetch('https://your-domain.com/api/subir', {
+      method: 'POST',
+      body: formData
+    });
+    
+    const result = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(`Chunk ${chunkIndex} failed: ${result.error}`);
+    }
+    
+    // Progress tracking
+    const progress = ((chunkIndex + 1) / totalChunks) * 100;
+    console.log(`Progress: ${progress.toFixed(1)}%`);
+    
+    // If this was the last chunk, we get the server ID
+    if (result.servidor_id) {
+      console.log('Upload complete! Server ID:', result.servidor_id);
+      return result.servidor_id;
+    }
+  }
+}
+
+// Usage
+const fileInput = document.getElementById('worldFile');
+const file = fileInput.files[0];
+
+try {
+  const serverId = await uploadWorldInChunks(file);
+  
+  // Now poll for status
+  const statusInterval = setInterval(async () => {
+    const statusResponse = await fetch(`https://your-domain.com/api/estado/${serverId}`);
+    const status = await statusResponse.json();
+    
+    console.log('Status:', status.estado);
+    
+    if (status.estado === 'listo') {
+      clearInterval(statusInterval);
+      console.log('Download URL:', status.download_url);
+    } else if (status.estado === 'error') {
+      clearInterval(statusInterval);
+      console.error('Processing failed');
+    }
+  }, 5000); // Check every 5 seconds
+  
+} catch (error) {
+  console.error('Upload failed:', error);
+}
+```
+
+## Node.js Example
+
+For server-side uploads using Node.js:
+
+```javascript
+const fs = require('fs');
+const FormData = require('form-data');
+const fetch = require('node-fetch');
+const { v4: uuidv4 } = require('uuid');
+
+const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB
+
+async function uploadChunkedWorld(filePath) {
+  const uploadId = uuidv4();
+  const fileName = path.basename(filePath);
+  const fileSize = fs.statSync(filePath).size;
+  const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
+  
+  const fileStream = fs.createReadStream(filePath, { highWaterMark: CHUNK_SIZE });
+  let chunkIndex = 0;
+  
+  for await (const chunk of fileStream) {
+    const formData = new FormData();
+    formData.append('uploadId', uploadId);
+    formData.append('fileName', fileName);
+    formData.append('chunkIndex', chunkIndex.toString());
+    formData.append('totalChunks', totalChunks.toString());
+    formData.append('isLastChunk', (chunkIndex === totalChunks - 1).toString());
+    formData.append('mundo_comprimido', chunk, {
+      filename: `chunk_${chunkIndex}`,
+      contentType: 'application/octet-stream'
+    });
+    
+    const response = await fetch('https://your-domain.com/api/subir', {
+      method: 'POST',
+      body: formData
+    });
+    
+    const result = await response.json();
+    console.log(`Chunk ${chunkIndex + 1}/${totalChunks} uploaded`);
+    
+    if (result.servidor_id) {
+      return result.servidor_id;
+    }
+    
+    chunkIndex++;
+  }
+}
+```
+
+## Assembly Process
+
+When the last chunk is received, the server performs the following steps:
+
+<Steps>
+  <Step title="Validate all chunks">
+    The server checks that all chunks from 0 to `totalChunks - 1` exist in the temporary directory.
+    
+    ```php
+    for ($i = 0; $i < $totalChunks; $i++) {
+        $chunkFilePath = $tempDir . "/chunk_{$i}";
+        if (!file_exists($chunkFilePath)) {
+            return response()->json(['error' => "Falta el chunk {$i}"], 400);
+        }
+    }
+    ```
+  </Step>
+  
+  <Step title="Assemble chunks">
+    All chunks are concatenated in order into a single file.
+    
+    ```php
+    $finalFile = fopen($finalPath, 'ab');
+    for ($i = 0; $i < $totalChunks; $i++) {
+        $chunkFilePath = $tempDir . "/chunk_{$i}";
+        fwrite($finalFile, file_get_contents($chunkFilePath));
+    }
+    fclose($finalFile);
+    ```
+  </Step>
+  
+  <Step title="Create UploadedFile">
+    The assembled file is converted to an `UploadedFile` instance for standard processing.
+  </Step>
+  
+  <Step title="Cleanup temporary files">
+    All chunk files and the temporary directory are deleted.
+  </Step>
+  
+  <Step title="Queue for processing">
+    The assembled file is queued for compression and optimization.
+  </Step>
+</Steps>
+
+## Error Handling
+
+### Missing Chunks
+
+If any chunk is missing when assembly begins:
+
+```json
+{
+  "error": "Falta el chunk 5"
+}
+```
+
+The server will delete all uploaded chunks and the partial assembly. You must restart the entire upload.
+
+### Chunk Upload Failure
+
+For non-final chunks:
+
+```json
+{
+  "error": "No chunk file uploaded."
+}
+```
+
+<Warning>
+If a chunk upload fails, you should abort the entire upload and restart from the beginning. The server does not support resuming partial uploads.
+</Warning>
+
+## Progress Tracking
+
+Implement progress tracking on the client side:
+
+```javascript
+function createProgressTracker(totalChunks) {
+  let uploadedChunks = 0;
+  
+  return {
+    update() {
+      uploadedChunks++;
+      const percentage = (uploadedChunks / totalChunks) * 100;
+      const uploadedMB = (uploadedChunks * CHUNK_SIZE) / (1024 * 1024);
+      
+      console.log(`Progress: ${percentage.toFixed(1)}% (${uploadedMB.toFixed(1)} MB uploaded)`);
+      
+      // Update UI progress bar
+      document.getElementById('progressBar').style.width = `${percentage}%`;
+      document.getElementById('progressText').textContent = 
+        `${uploadedChunks} / ${totalChunks} chunks uploaded`;
+    },
+    
+    isComplete() {
+      return uploadedChunks === totalChunks;
+    }
+  };
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Choose appropriate chunk size">
+    - **5-10 MB**: Good balance for most networks
+    - **Smaller (1-2 MB)**: For slow or unreliable connections
+    - **Larger (20-50 MB)**: For fast, stable connections
+  </Accordion>
+  
+  <Accordion title="Implement retry logic">
+    ```javascript
+    async function uploadChunkWithRetry(formData, maxRetries = 3) {
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          const response = await fetch('/api/subir', {
+            method: 'POST',
+            body: formData
+          });
+          
+          if (response.ok) return await response.json();
+          
+          if (attempt === maxRetries) throw new Error('Max retries reached');
+          
+          // Wait before retrying (exponential backoff)
+          await new Promise(resolve => 
+            setTimeout(resolve, Math.pow(2, attempt) * 1000)
+          );
+          
+        } catch (error) {
+          if (attempt === maxRetries) throw error;
+        }
+      }
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Generate unique upload IDs">
+    Use UUIDs or a similar unique identifier generator:
+    
+    ```javascript
+    // Browser (modern)
+    const uploadId = crypto.randomUUID();
+    
+    // Node.js
+    const { v4: uuidv4 } = require('uuid');
+    const uploadId = uuidv4();
+    
+    // Fallback
+    const uploadId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Upload Status" icon="chart-line" href="/api/servers/get-status">
+    Monitor the processing status of your uploaded world
+  </Card>
+  <Card title="Notifications" icon="bell" href="/guides/notifications">
+    Get notified when processing completes via Discord webhooks
+  </Card>
+</CardGroup>

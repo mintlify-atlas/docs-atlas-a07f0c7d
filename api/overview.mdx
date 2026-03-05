@@ -1,0 +1,93 @@
+---
+title: 'API Overview'
+description: 'Overview of the MC World Compressor API endpoints and usage'
+---
+
+## Base URL
+
+All API endpoints are prefixed with `/api`:
+
+```
+http://your-domain.com/api
+```
+
+## Available Endpoints
+
+The API provides the following endpoints:
+
+### Health Check
+- **GET** `/api/test` - Check API health status
+
+### World Compression
+- **POST** `/api/comprimir` - Compress a Minecraft world file
+
+### Server Queue Management
+- **GET** `/api/cola` - Get current queue size
+- **POST** `/api/subir` - Upload a world for processing
+- **GET** `/api/estado/{id}` - Get processing status by server ID
+
+## Request/Response Format
+
+All API endpoints accept and return JSON data, except for file upload endpoints which use `multipart/form-data`.
+
+### Standard Response Format
+
+Successful responses typically return JSON with relevant data:
+
+```json
+{
+  "status": "ok",
+  "data": {}
+}
+```
+
+Error responses follow this format:
+
+```json
+{
+  "error": "Error message description"
+}
+```
+
+## Health Check Endpoint
+
+The `/api/test` endpoint provides a simple health check to verify the API is running.
+
+### Request
+
+```bash
+curl -X GET http://your-domain.com/api/test
+```
+
+### Response
+
+```json
+{
+  "status": "ok"
+}
+```
+
+This endpoint is useful for:
+- Monitoring API availability
+- Verifying network connectivity
+- Load balancer health checks
+
+## Content Types
+
+- **JSON Endpoints**: `Content-Type: application/json`
+- **File Upload Endpoints**: `Content-Type: multipart/form-data`
+
+## Rate Limiting
+
+The API uses Laravel's standard middleware stack. Rate limiting may be configured on the server side.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="lock" href="/api/authentication">
+    Learn about API authentication and CSRF requirements
+  </Card>
+  <Card title="Error Handling" icon="circle-exclamation" href="/api/errors">
+    Understand error codes and troubleshooting
+  </Card>
+</CardGroup>

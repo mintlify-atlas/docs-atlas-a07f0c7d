@@ -1,0 +1,288 @@
+---
+title: 'Installation'
+description: 'Set up MC World Compressor Backend on your server'
+---
+
+## System Requirements
+
+Before you begin, ensure your system meets these requirements:
+
+<CardGroup cols={2}>
+  <Card title="PHP" icon="php">
+    Version 8.2 or higher
+  </Card>
+  <Card title="Composer" icon="box">
+    Latest stable version
+  </Card>
+  <Card title="Node.js" icon="node-js">
+    Version 18 or higher
+  </Card>
+  <Card title="Database" icon="database">
+    SQLite (default) or MySQL/PostgreSQL
+  </Card>
+</CardGroup>
+
+## Installation Steps
+
+<Steps>
+  <Step title="Clone the Repository">
+    Download the MC World Compressor backend:
+
+    ```bash
+    git clone https://github.com/MC-World-Compressor/Backend.git
+    cd Backend
+    ```
+  </Step>
+
+  <Step title="Install Dependencies">
+    Install both PHP and JavaScript dependencies:
+
+    <CodeGroup>
+      ```bash npm & composer
+      npm install && composer install
+      ```
+
+      ```bash separate commands
+      composer install
+      npm install
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Install Thanos Compression Library">
+    Clone the Thanos library into the project root:
+
+    ```bash
+    git clone https://github.com/aternosorg/thanos.git
+    ```
+
+    <Warning>
+    The Thanos library must be in a folder named `thanos` at the project root. The application will not work without it.
+    </Warning>
+  </Step>
+
+  <Step title="Configure Environment">
+    Copy the example environment file and customize it:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    Edit the `.env` file with your configuration:
+
+    ```bash .env
+    APP_NAME="MC World Compressor"
+    APP_ENV=local
+    APP_DEBUG=true
+    APP_URL=http://localhost:8000
+
+    # Database Configuration
+    DB_CONNECTION=sqlite
+    # For MySQL/PostgreSQL, uncomment and configure:
+    # DB_HOST=127.0.0.1
+    # DB_PORT=3306
+    # DB_DATABASE=mcwcompressor
+    # DB_USERNAME=root
+    # DB_PASSWORD=
+
+    # Session & Queue
+    SESSION_DRIVER=database
+    QUEUE_CONNECTION=database
+    CACHE_STORE=database
+
+    # Discord Notifications (Optional)
+    DISCORD_NOTIFICACIONES_WEBHOOK=
+    ```
+
+    <Info>
+    The default configuration uses SQLite, which requires no additional setup. The database file will be created automatically.
+    </Info>
+  </Step>
+
+  <Step title="Generate Application Key">
+    Generate a unique encryption key for your application:
+
+    ```bash
+    php artisan key:generate
+    ```
+
+    This will automatically update your `.env` file with a secure `APP_KEY`.
+  </Step>
+
+  <Step title="Set Up the Database">
+    Run the database migrations to create required tables:
+
+    ```bash
+    php artisan migrate
+    ```
+
+    This creates the following tables:
+    - `servidores` - Stores uploaded worlds and processing status
+    - `jobs` - Manages the processing queue
+    - `cache` - Application cache storage
+    - `sessions` - User session data
+
+    <Note>
+    If using SQLite, the database file will be created at `database/database.sqlite`.
+    </Note>
+  </Step>
+
+  <Step title="Create Storage Link">
+    Link the storage directory to make compressed worlds publicly accessible:
+
+    ```bash
+    php artisan storage:link
+    ```
+
+    <Warning>
+    Ensure the `storage` and `public` directories have write permissions:
+    ```bash
+    chmod -R 775 storage bootstrap/cache
+    ```
+    </Warning>
+  </Step>
+
+  <Step title="Start the Server">
+    Launch the development server with all required services:
+
+    ```bash
+    npm start
+    ```
+
+    This command starts:
+    - Laravel development server on port 8000
+    - Queue worker for background job processing
+    - Task scheduler for automatic cleanup
+
+    <Tip>
+    Access the application at [http://localhost:8000](http://localhost:8000)
+    </Tip>
+  </Step>
+</Steps>
+
+## Verify Installation
+
+Test that your installation is working correctly:
+
+```bash
+curl http://localhost:8000/api/test
+```
+
+**Expected response:**
+```json
+{
+  "status": "ok"
+}
+```
+
+<Info>
+If you receive this response, your installation is successful!
+</Info>
+
+## Directory Structure
+
+Key directories in the project:
+
+```
+Backend/
+├── app/
+│   ├── Http/Controllers/API/
+│   │   ├── CompressionController.php  # Direct compression endpoint
+│   │   └── ServidorController.php      # Upload & status management
+│   ├── Jobs/
+│   │   └── ProcesarMundoServidorJob.php
+│   └── Models/
+│       └── Servidor.php
+├── database/
+│   └── migrations/                     # Database schema
+├── storage/
+│   ├── app/
+│   │   ├── chunks/                     # Temporary chunk storage
+│   │   └── temp_uploads/               # Temporary file uploads
+│   └── public/
+│       ├── compressed_worlds/          # Final compressed worlds
+│       └── mundos_pendientes/          # Uploaded worlds queue
+├── thanos/                             # Thanos compression library
+└── .env                                # Environment configuration
+```
+
+## Production Configuration
+
+For production deployments, update these settings in your `.env`:
+
+```bash .env
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://your-domain.com
+
+# Use a more robust database
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=mcwcompressor
+DB_USERNAME=your_username
+DB_PASSWORD=your_password
+
+# Configure proper queue driver
+QUEUE_CONNECTION=redis
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+```
+
+<Warning>
+**Production Checklist:**
+- Set `APP_DEBUG=false`
+- Use a production-grade database (MySQL/PostgreSQL)
+- Configure Redis for better queue performance
+- Set up proper file permissions
+- Enable HTTPS
+- Configure automated backups
+</Warning>
+
+## Troubleshooting
+
+### Queue Not Processing
+
+If worlds stay in "pendiente" status:
+
+```bash
+# Check queue worker is running
+php artisan queue:work
+
+# Check for failed jobs
+php artisan queue:failed
+```
+
+### Storage Permission Errors
+
+```bash
+# Fix storage permissions
+sudo chown -R www-data:www-data storage bootstrap/cache
+chmod -R 775 storage bootstrap/cache
+```
+
+### Thanos Library Not Found
+
+Ensure the Thanos library is in the correct location:
+
+```bash
+ls -la thanos/
+# Should show the thanos library files
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart Guide" icon="rocket" href="/quickstart">
+    Start compressing Minecraft worlds
+  </Card>
+  <Card title="API Reference" icon="book" href="/api/overview">
+    Explore the complete API documentation
+  </Card>
+  <Card title="Docker Deployment" icon="docker" href="/guides/docker-deployment">
+    Deploy with Docker
+  </Card>
+  <Card title="Job Queue" icon="list-check" href="/concepts/job-queue">
+    Understand the queue system
+  </Card>
+</CardGroup>
